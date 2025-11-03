@@ -15,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 import docker
 import psutil
 import subprocess
+import yaml
 
 
 ROOT_DIR = Path(__file__).parent
@@ -90,6 +91,36 @@ class PullImageRequest(BaseModel):
     image: str
     tag: str = "latest"
 
+class ContainerTemplate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    description: str
+    config: Dict[str, Any]
+    category: str = "custom"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class Alert(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    alert_type: str  # cpu, memory, disk, container_stopped
+    severity: str  # info, warning, critical
+    message: str
+    container_name: Optional[str] = None
+    threshold: Optional[float] = None
+    current_value: Optional[float] = None
+    acknowledged: bool = False
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class WebhookConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    url: str
+    webhook_type: str  # slack, discord, telegram, custom
+    events: List[str] = []  # container_start, container_stop, alert, etc
+    enabled: bool = True
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="ignore")
     poll_interval: int = 5
@@ -109,6 +140,10 @@ class Settings(BaseModel):
     log_retention_days: int = 30
     enable_auto_prune: bool = False
     auto_prune_schedule: str = "weekly"
+    enable_alerts: bool = True
+    cpu_alert_threshold: int = 80
+    memory_alert_threshold: int = 80
+    disk_alert_threshold: int = 85
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ActivityLog(BaseModel):
@@ -127,6 +162,10 @@ class ContainerStats(BaseModel):
     memory_mb: float
     memory_percent: float
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class ExecCommand(BaseModel):
+    command: str
+    workdir: Optional[str] = None
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -202,8 +241,6 @@ def get_container_info(container):
         is_npm = 'nginx-proxy-manager' in container.name.lower() or 'npm' in container.name.lower()
         hostname = container.attrs['Config'].get('Hostname', 'N/A')
         domainname = container.attrs['Config'].get('Domainname', '')
-        
-        # Health check
         health_status = container.attrs['State'].get('Health', {}).get('Status', None)
         
         return {
@@ -276,7 +313,8 @@ def get_system_metrics():
         "memory_total_mb": round(memory.total / (1024 * 1024), 2),
         "disk_percent": round(disk.percent, 2),
         "disk_used_gb": round(disk.used / (1024 * 1024 * 1024), 2),
-        "disk_total_gb": round(disk.total / (1024 * 1024 * 1024), 2)
+        "disk_total_gb": round(disk.total / (1024 * 1024 * 1024), 2),
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 
@@ -309,22 +347,68 @@ async def save_container_stats(container_name: str, stats: dict):
         doc['timestamp'] = doc['timestamp'].isoformat()
         await db.container_stats.insert_one(doc)
         
-        # Clean old stats (keep last 24 hours)
         cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         await db.container_stats.delete_many({"timestamp": {"$lt": cutoff.isoformat()}})
     except Exception as e:
         logging.error(f"Error saving stats: {e}")
 
 
+async def check_and_create_alerts(containers: list, system_metrics: dict, settings: dict):
+    """Check for alert conditions and create alerts"""
+    if not settings.get('enable_alerts', True):
+        return
+    
+    try:
+        # System alerts
+        if system_metrics['cpu_percent'] > settings.get('cpu_alert_threshold', 80):
+            alert = Alert(
+                alert_type="cpu",
+                severity="warning" if system_metrics['cpu_percent'] < 90 else "critical",
+                message=f"High CPU usage: {system_metrics['cpu_percent']}%",
+                threshold=settings.get('cpu_alert_threshold'),
+                current_value=system_metrics['cpu_percent']
+            )
+            doc = alert.model_dump()
+            doc['timestamp'] = doc['timestamp'].isoformat()
+            await db.alerts.insert_one(doc)
+        
+        if system_metrics['memory_percent'] > settings.get('memory_alert_threshold', 80):
+            alert = Alert(
+                alert_type="memory",
+                severity="warning" if system_metrics['memory_percent'] < 90 else "critical",
+                message=f"High memory usage: {system_metrics['memory_percent']}%",
+                threshold=settings.get('memory_alert_threshold'),
+                current_value=system_metrics['memory_percent']
+            )
+            doc = alert.model_dump()
+            doc['timestamp'] = doc['timestamp'].isoformat()
+            await db.alerts.insert_one(doc)
+        
+        # Container alerts
+        for container in containers:
+            if container['stats']['cpu_percent'] > 90:
+                alert = Alert(
+                    alert_type="container_cpu",
+                    severity="warning",
+                    message=f"Container {container['name']} high CPU: {container['stats']['cpu_percent']}%",
+                    container_name=container['name'],
+                    current_value=container['stats']['cpu_percent']
+                )
+                doc = alert.model_dump()
+                doc['timestamp'] = doc['timestamp'].isoformat()
+                await db.alerts.insert_one(doc)
+    except Exception as e:
+        logging.error(f"Error checking alerts: {e}")
+
+
 # API Routes
 @api_router.get("/")
 async def root():
-    return {"message": "DockerWakeUp WebUI API", "version": "2.0.0", "docker_available": DOCKER_AVAILABLE}
+    return {"message": "DockerWakeUp WebUI API", "version": "3.0.0", "docker_available": DOCKER_AVAILABLE}
 
 
 @api_router.get("/containers")
-async def list_containers(all: bool = True, filters: Optional[str] = None):
-    """List all containers"""
+async def list_containers(all: bool = True):
     if not DOCKER_AVAILABLE:
         return JSONResponse({"error": "Docker not available"}, status_code=503)
     
@@ -339,7 +423,6 @@ async def list_containers(all: bool = True, filters: Optional[str] = None):
 
 @api_router.get("/container/{container_name}/inspect")
 async def inspect_container(container_name: str):
-    """Get detailed container information"""
     if not DOCKER_AVAILABLE:
         return JSONResponse({"error": "Docker not available"}, status_code=503)
     
@@ -352,9 +435,39 @@ async def inspect_container(container_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@api_router.post("/container/{container_name}/exec")
+async def exec_container(container_name: str, command: ExecCommand):
+    """Execute command in container"""
+    if not DOCKER_AVAILABLE:
+        return JSONResponse({"error": "Docker not available"}, status_code=503)
+    
+    try:
+        container = docker_client.containers.get(container_name)
+        exec_result = container.exec_run(
+            command.command,
+            workdir=command.workdir,
+            demux=True
+        )
+        
+        output = exec_result.output
+        if isinstance(output, tuple):
+            stdout, stderr = output
+            output_str = (stdout.decode('utf-8') if stdout else '') + (stderr.decode('utf-8') if stderr else '')
+        else:
+            output_str = output.decode('utf-8') if output else ''
+        
+        return {
+            "exit_code": exec_result.exit_code,
+            "output": output_str
+        }
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Container not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @api_router.post("/container/{container_name}/{action}")
 async def container_action(container_name: str, action: str):
-    """Perform action on a container"""
     if not DOCKER_AVAILABLE:
         return JSONResponse({"error": "Docker not available"}, status_code=503)
     
@@ -396,7 +509,6 @@ async def container_action(container_name: str, action: str):
 
 @api_router.post("/containers/bulk")
 async def bulk_action(bulk: BulkAction):
-    """Perform bulk action on multiple containers"""
     if not DOCKER_AVAILABLE:
         return JSONResponse({"error": "Docker not available"}, status_code=503)
     
@@ -426,7 +538,6 @@ async def bulk_action(bulk: BulkAction):
 
 @api_router.post("/container/create")
 async def create_container(request: CreateContainerRequest):
-    """Create a new container"""
     if not DOCKER_AVAILABLE:
         return JSONResponse({"error": "Docker not available"}, status_code=503)
     
@@ -507,15 +618,44 @@ async def create_container(request: CreateContainerRequest):
         raise HTTPException(status_code=500, detail=error_msg)
 
 
-@api_router.get("/logs/{container_name}")
-async def get_logs(container_name: str, tail: int = 100):
-    """Get container logs"""
+@api_router.get("/container/{container_name}/export")
+async def export_container_config(container_name: str):
+    """Export container configuration as docker-compose format"""
     if not DOCKER_AVAILABLE:
         return JSONResponse({"error": "Docker not available"}, status_code=503)
     
     try:
         container = docker_client.containers.get(container_name)
-        logs = container.logs(tail=tail).decode('utf-8')
+        attrs = container.attrs
+        
+        config = {
+            "version": "3.8",
+            "services": {
+                container_name: {
+                    "image": attrs['Config']['Image'],
+                    "container_name": container_name,
+                    "restart": attrs['HostConfig']['RestartPolicy']['Name'] or 'no',
+                    "environment": attrs['Config']['Env'],
+                    "ports": [f"{b['HostPort']}:{cp.split('/')[0]}" for cp, bindings in (attrs['HostConfig']['PortBindings'] or {}).items() for b in bindings] if attrs['HostConfig']['PortBindings'] else [],
+                    "volumes": [f"{k}:{v['bind']}" for k, v in (attrs['HostConfig']['Binds'] or {}).items()] if attrs['HostConfig'].get('Binds') else [],
+                    "networks": list(attrs['NetworkSettings']['Networks'].keys())
+                }
+            }
+        }
+        
+        return {"config": yaml.dump(config, default_flow_style=False)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/logs/{container_name}")
+async def get_logs(container_name: str, tail: int = 100):
+    if not DOCKER_AVAILABLE:
+        return JSONResponse({"error": "Docker not available"}, status_code=503)
+    
+    try:
+        container = docker_client.containers.get(container_name)
+        logs = container.logs(tail=tail).decode('utf-8', errors='replace')
         return {"container": container_name, "logs": logs}
     except docker.errors.NotFound:
         raise HTTPException(status_code=404, detail="Container not found")
@@ -526,7 +666,6 @@ async def get_logs(container_name: str, tail: int = 100):
 
 @api_router.get("/container/{container_name}/stats/history")
 async def get_stats_history(container_name: str, hours: int = 1):
-    """Get historical stats for a container"""
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         stats = await db.container_stats.find(
@@ -543,7 +682,6 @@ async def get_stats_history(container_name: str, hours: int = 1):
 # Images
 @api_router.get("/images")
 async def list_images():
-    """List all Docker images"""
     if not DOCKER_AVAILABLE:
         return JSONResponse({"error": "Docker not available"}, status_code=503)
     
@@ -571,7 +709,6 @@ async def list_images():
 
 @api_router.post("/images/pull")
 async def pull_image(request: PullImageRequest):
-    """Pull a Docker image"""
     if not DOCKER_AVAILABLE:
         return JSONResponse({"error": "Docker not available"}, status_code=503)
     
@@ -591,7 +728,6 @@ async def pull_image(request: PullImageRequest):
 
 @api_router.post("/images/prune")
 async def prune_images():
-    """Prune unused images"""
     if not DOCKER_AVAILABLE:
         return JSONResponse({"error": "Docker not available"}, status_code=503)
     
@@ -611,7 +747,6 @@ async def prune_images():
 # Volumes
 @api_router.get("/volumes")
 async def list_volumes():
-    """List all Docker volumes"""
     if not DOCKER_AVAILABLE:
         return JSONResponse({"error": "Docker not available"}, status_code=503)
     
@@ -636,7 +771,6 @@ async def list_volumes():
 
 @api_router.post("/volumes/create")
 async def create_volume(request: CreateVolumeRequest):
-    """Create a Docker volume"""
     if not DOCKER_AVAILABLE:
         return JSONResponse({"error": "Docker not available"}, status_code=503)
     
@@ -657,7 +791,6 @@ async def create_volume(request: CreateVolumeRequest):
 
 @api_router.delete("/volumes/{volume_name}")
 async def delete_volume(volume_name: str):
-    """Delete a Docker volume"""
     if not DOCKER_AVAILABLE:
         return JSONResponse({"error": "Docker not available"}, status_code=503)
     
@@ -678,7 +811,6 @@ async def delete_volume(volume_name: str):
 # Networks
 @api_router.get("/networks")
 async def list_networks():
-    """List all Docker networks"""
     if not DOCKER_AVAILABLE:
         return JSONResponse({"error": "Docker not available"}, status_code=503)
     
@@ -709,7 +841,6 @@ async def list_networks():
 
 @api_router.post("/networks/create")
 async def create_network(request: CreateNetworkRequest):
-    """Create a Docker network"""
     if not DOCKER_AVAILABLE:
         return JSONResponse({"error": "Docker not available"}, status_code=503)
     
@@ -739,7 +870,6 @@ async def create_network(request: CreateNetworkRequest):
 
 @api_router.delete("/networks/{network_name}")
 async def delete_network(network_name: str):
-    """Delete a Docker network"""
     if not DOCKER_AVAILABLE:
         return JSONResponse({"error": "Docker not available"}, status_code=503)
     
@@ -760,7 +890,6 @@ async def delete_network(network_name: str):
 # System
 @api_router.get("/system/info")
 async def system_info():
-    """Get Docker system information"""
     if not DOCKER_AVAILABLE:
         return JSONResponse({"error": "Docker not available"}, status_code=503)
     
@@ -792,9 +921,114 @@ async def system_info():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@api_router.get("/system/metrics/history")
+async def get_system_metrics_history(hours: int = 1):
+    """Get historical system metrics"""
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        metrics = await db.system_metrics.find(
+            {"timestamp": {"$gte": cutoff.isoformat()}},
+            {"_id": 0}
+        ).sort("timestamp", 1).to_list(1000)
+        
+        return {"metrics": metrics, "count": len(metrics)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Templates
+@api_router.get("/templates")
+async def list_templates():
+    try:
+        templates = await db.templates.find({}, {"_id": 0}).to_list(100)
+        return {"templates": templates, "count": len(templates)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/templates")
+async def create_template(template: ContainerTemplate):
+    try:
+        doc = template.model_dump()
+        doc['created_at'] = doc['created_at'].isoformat()
+        await db.templates.insert_one(doc)
+        return {"success": True, "template_id": template.id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.delete("/templates/{template_id}")
+async def delete_template(template_id: str):
+    try:
+        result = await db.templates.delete_one({"id": template_id})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Template not found")
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Alerts
+@api_router.get("/alerts")
+async def list_alerts(limit: int = 50, acknowledged: Optional[bool] = None):
+    try:
+        query = {}
+        if acknowledged is not None:
+            query['acknowledged'] = acknowledged
+        
+        alerts = await db.alerts.find(query, {"_id": 0}).sort("timestamp", -1).limit(limit).to_list(limit)
+        return {"alerts": alerts, "count": len(alerts)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/alerts/{alert_id}/acknowledge")
+async def acknowledge_alert(alert_id: str):
+    try:
+        result = await db.alerts.update_one(
+            {"id": alert_id},
+            {"$set": {"acknowledged": True}}
+        )
+        if result.modified_count == 0:
+            raise HTTPException(status_code=404, detail="Alert not found")
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Webhooks
+@api_router.get("/webhooks")
+async def list_webhooks():
+    try:
+        webhooks = await db.webhooks.find({}, {"_id": 0}).to_list(100)
+        return {"webhooks": webhooks, "count": len(webhooks)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/webhooks")
+async def create_webhook(webhook: WebhookConfig):
+    try:
+        doc = webhook.model_dump()
+        await db.webhooks.insert_one(doc)
+        return {"success": True, "webhook_id": webhook.id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.delete("/webhooks/{webhook_id}")
+async def delete_webhook(webhook_id: str):
+    try:
+        result = await db.webhooks.delete_one({"id": webhook_id})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Webhook not found")
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @api_router.get("/activity-logs")
 async def get_activity_logs(limit: int = 50):
-    """Get activity logs"""
     try:
         logs = await db.activity_logs.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit).to_list(limit)
         return {"logs": logs, "count": len(logs)}
@@ -805,14 +1039,12 @@ async def get_activity_logs(limit: int = 50):
 
 @api_router.get("/system/metrics")
 async def system_metrics():
-    """Get system metrics"""
     return get_system_metrics()
 
 
 # Settings
 @api_router.get("/settings")
 async def get_settings():
-    """Get application settings"""
     try:
         settings_doc = await db.settings.find_one({}, {"_id": 0})
         if not settings_doc:
@@ -826,7 +1058,6 @@ async def get_settings():
 
 @api_router.post("/settings")
 async def update_settings(settings: Settings):
-    """Update application settings"""
     try:
         settings_dict = settings.model_dump()
         settings_dict['updated_at'] = datetime.now(timezone.utc).isoformat()
@@ -845,7 +1076,6 @@ async def update_settings(settings: Settings):
 
 @api_router.post("/settings/reset")
 async def reset_settings():
-    """Reset settings to defaults"""
     try:
         default_settings = Settings()
         settings_dict = default_settings.model_dump()
@@ -867,7 +1097,8 @@ async def reset_settings():
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
-        await websocket.send_json({"type": "system_metrics", "data": get_system_metrics()})
+        system_metrics = get_system_metrics()
+        await websocket.send_json({"type": "system_metrics", "data": system_metrics})
         
         while True:
             try:
@@ -878,7 +1109,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         containers = docker_client.containers.list(all=True)
                         container_stats = [get_container_info(c) for c in containers]
                         
-                        # Save stats to history
                         for container_stat in container_stats:
                             if container_stat['status'] == 'running':
                                 await save_container_stats(
@@ -890,7 +1120,24 @@ async def websocket_endpoint(websocket: WebSocket):
                     except:
                         pass
                 
-                await websocket.send_json({"type": "system_metrics", "data": get_system_metrics()})
+                system_metrics = get_system_metrics()
+                await websocket.send_json({"type": "system_metrics", "data": system_metrics})
+                
+                # Save system metrics history
+                try:
+                    await db.system_metrics.insert_one(system_metrics)
+                    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+                    await db.system_metrics.delete_many({"timestamp": {"$lt": cutoff.isoformat()}})
+                except:
+                    pass
+                
+                # Check alerts
+                try:
+                    settings = await get_settings()
+                    await check_and_create_alerts(container_stats if DOCKER_AVAILABLE else [], system_metrics, settings)
+                except:
+                    pass
+                
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:
@@ -898,7 +1145,6 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 
-# Include the router
 app.include_router(api_router)
 
 app.add_middleware(
