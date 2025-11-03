@@ -91,9 +91,17 @@ const ContainerCard = ({ container, selected, onSelect, onActionComplete, style 
           </div>
         )}
 
+        {/* Network Info Badge */}
+        {container.is_npm && (
+          <div className="mb-3">
+            <span className="px-2 py-1 bg-green-500/20 text-green-300 rounded text-xs font-semibold">
+              🔧 Nginx Proxy Manager
+            </span>
+          </div>
+        )}
+
         {/* Actions */}
-        <div className="flex items-center gap-2">
-          {container.status === 'running' ? (
+        <div className="grid grid-cols-6 gap-2">{container.status === 'running' ? (
             <>
               <button
                 onClick={() => handleAction('stop')}
