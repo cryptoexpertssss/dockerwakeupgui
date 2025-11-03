@@ -162,6 +162,24 @@ const ContainerCard = ({ container, selected, onSelect, onActionComplete, viewMo
           </div>
         )}
 
+        {/* Route & Docker URL */}
+        {(container.route || container.docker_url) && (
+          <div className="mb-3 p-2 bg-purple-500/10 border border-purple-500/20 rounded text-xs">
+            {container.route && (
+              <div className="mb-1">
+                <span className="text-purple-400">Route:</span> 
+                <span className="text-purple-200 ml-2 font-mono">{container.route}</span>
+              </div>
+            )}
+            {container.docker_url && (
+              <div>
+                <span className="text-purple-400">URL:</span> 
+                <span className="text-purple-200 ml-2 font-mono">{container.docker_url}</span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* NPM Badge */}
         {container.is_npm && (
           <div className="mb-3">
