@@ -49,6 +49,31 @@ class BulkAction(BaseModel):
     container_names: List[str]
     action: str
 
+class PortMapping(BaseModel):
+    host_port: str
+    container_port: str
+    protocol: str = "tcp"
+
+class VolumeMount(BaseModel):
+    host_path: str
+    container_path: str
+    mode: str = "rw"  # rw or ro
+
+class CreateContainerRequest(BaseModel):
+    name: str
+    image: str
+    ports: List[PortMapping] = []
+    volumes: List[VolumeMount] = []
+    environment: Dict[str, str] = {}
+    command: Optional[str] = None
+    network_mode: str = "bridge"
+    restart_policy: str = "unless-stopped"  # no, always, on-failure, unless-stopped
+    depends_on: List[str] = []  # Container names that should start before this
+    idle_timeout: Optional[int] = None  # Timeout in seconds
+    detach: bool = True
+    auto_remove: bool = False
+    labels: Dict[str, str] = {}
+
 class ActivityLog(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -267,6 +292,101 @@ async def bulk_action(bulk: BulkAction):
     
     await manager.broadcast({"type": "bulk_action", "action": bulk.action, "results": results})
     return {"results": results}
+
+
+@api_router.post("/container/create")
+async def create_container(request: CreateContainerRequest):
+    """Create a new container"""
+    if not DOCKER_AVAILABLE:
+        return JSONResponse({"error": "Docker not available"}, status_code=503)
+    
+    try:
+        # Check if container name already exists
+        try:
+            existing = docker_client.containers.get(request.name)
+            raise HTTPException(status_code=400, detail=f"Container with name '{request.name}' already exists")
+        except docker.errors.NotFound:
+            pass  # Good, container doesn't exist
+        
+        # Start dependent containers first
+        if request.depends_on:
+            for dep_name in request.depends_on:
+                try:
+                    dep_container = docker_client.containers.get(dep_name)
+                    if dep_container.status != 'running':
+                        dep_container.start()
+                        await log_activity("start_dependency", dep_name, "success", f"Started dependency for {request.name}")
+                except docker.errors.NotFound:
+                    raise HTTPException(status_code=400, detail=f"Dependency container '{dep_name}' not found")
+        
+        # Prepare port bindings
+        port_bindings = {}
+        exposed_ports = {}
+        for port in request.ports:
+            container_port_key = f"{port.container_port}/{port.protocol}"
+            exposed_ports[container_port_key] = {}
+            port_bindings[container_port_key] = port.host_port
+        
+        # Prepare volume bindings
+        volumes = {}
+        for vol in request.volumes:
+            volumes[vol.host_path] = {'bind': vol.container_path, 'mode': vol.mode}
+        
+        # Prepare restart policy
+        restart_policy_map = {
+            "no": {"Name": "no"},
+            "always": {"Name": "always"},
+            "on-failure": {"Name": "on-failure", "MaximumRetryCount": 3},
+            "unless-stopped": {"Name": "unless-stopped"}
+        }
+        restart_policy = restart_policy_map.get(request.restart_policy, {"Name": "no"})
+        
+        # Add idle timeout to labels if specified
+        labels = request.labels.copy()
+        if request.idle_timeout:
+            labels['dockerwakeup.idle_timeout'] = str(request.idle_timeout)
+        
+        # Create container
+        container = docker_client.containers.create(
+            image=request.image,
+            name=request.name,
+            command=request.command,
+            environment=request.environment,
+            ports=exposed_ports,
+            volumes=volumes,
+            network_mode=request.network_mode,
+            restart_policy=restart_policy,
+            detach=request.detach,
+            auto_remove=request.auto_remove,
+            labels=labels
+        )
+        
+        # Start the container
+        container.start()
+        
+        await log_activity("create_container", request.name, "success", f"Container {request.name} created and started")
+        await manager.broadcast({"type": "container_event", "action": "create", "container": request.name, "status": "success"})
+        
+        return {
+            "success": True,
+            "message": f"Container {request.name} created successfully",
+            "container_id": container.short_id,
+            "container_name": request.name
+        }
+    
+    except docker.errors.ImageNotFound:
+        error_msg = f"Image '{request.image}' not found. Pull the image first."
+        await log_activity("create_container", request.name, "error", error_msg)
+        raise HTTPException(status_code=404, detail=error_msg)
+    except docker.errors.APIError as e:
+        error_msg = f"Docker API error: {str(e)}"
+        await log_activity("create_container", request.name, "error", error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+    except Exception as e:
+        error_msg = f"Error creating container: {str(e)}"
+        await log_activity("create_container", request.name, "error", error_msg)
+        logging.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 
 @api_router.get("/logs/{container_name}")

@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Activity, Box, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, AlertCircle } from 'lucide-react';
+import { Activity, Box, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, AlertCircle, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import Sidebar from '../components/Sidebar';
 import ContainerCard from '../components/ContainerCard';
 import SystemMetrics from '../components/SystemMetrics';
 import BulkActionBar from '../components/BulkActionBar';
+import CreateContainerModal from '../components/CreateContainerModal';
 import { useWebSocket } from '../hooks/useWebSocket';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -18,6 +19,7 @@ const Dashboard = () => {
   const [selectedContainers, setSelectedContainers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dockerAvailable, setDockerAvailable] = useState(true);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const { systemMetrics, containerStats, connected } = useWebSocket();
 
   const fetchContainers = async () => {
@@ -61,6 +63,11 @@ const Dashboard = () => {
     toast.success('Refreshed containers list');
   };
 
+  const handleCreateSuccess = () => {
+    setShowCreateModal(false);
+    fetchContainers();
+  };
+
   return (
     <div className="flex h-screen bg-gradient-to-br from-[#0a0a0f] via-[#13131a] to-[#0a0a0f]">
       <Sidebar active="dashboard" />
@@ -79,14 +86,24 @@ const Dashboard = () => {
                   {connected ? 'Connected' : 'Disconnected'} • {containers.length} containers
                 </p>
               </div>
-              <button
-                onClick={handleRefresh}
-                data-testid="refresh-button"
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-              >
-                <RefreshCw size={18} />
-                Refresh
-              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowCreateModal(true)}
+                  data-testid="add-container-button"
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+                >
+                  <Plus size={18} />
+                  Add Container
+                </button>
+                <button
+                  onClick={handleRefresh}
+                  data-testid="refresh-button"
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                >
+                  <RefreshCw size={18} />
+                  Refresh
+                </button>
+              </div>
             </div>
           </div>
 
@@ -125,7 +142,13 @@ const Dashboard = () => {
             ) : containers.length === 0 ? (
               <div className="text-center py-12 bg-gray-800/30 rounded-lg border border-gray-700" data-testid="no-containers">
                 <Box size={48} className="mx-auto text-gray-600 mb-4" />
-                <p className="text-gray-400">No containers found</p>
+                <p className="text-gray-400 mb-4">No containers found</p>
+                <button
+                  onClick={() => setShowCreateModal(true)}
+                  className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                >
+                  Create Your First Container
+                </button>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="containers-grid">
@@ -144,6 +167,15 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* Create Container Modal */}
+      {showCreateModal && (
+        <CreateContainerModal
+          containers={containers}
+          onClose={() => setShowCreateModal(false)}
+          onSuccess={handleCreateSuccess}
+        />
+      )}
     </div>
   );
 };
