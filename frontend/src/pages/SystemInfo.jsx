@@ -4,6 +4,7 @@ import { Server, RefreshCw, HardDrive, Cpu, Box } from 'lucide-react';
 import { toast } from 'sonner';
 import Sidebar from '../components/Sidebar';
 import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
