@@ -25,7 +25,13 @@ const CreateContainerModal = ({ containers, onClose, onSuccess }) => {
     depends_on: [],
     ports: [],
     volumes: [],
-    environment: []
+    environment: [],
+    // New fields
+    route: '',
+    docker_url: '',
+    docker_path: '',
+    deployment_type: 'docker_run',  // 'docker_run' or 'compose'
+    run_command: ''
   });
 
   const handleInputChange = (field, value) => {
