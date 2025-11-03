@@ -414,6 +414,66 @@ const Settings = () => {
               </div>
             </div>
 
+            {/* Alert Settings */}
+            <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700 rounded-lg p-6">
+              <h2 className="text-2xl font-semibold text-white mb-4">Alert Thresholds</h2>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-white">Enable Alerts</Label>
+                    <p className="text-xs text-gray-400 mt-1">Automatically generate alerts for resource usage</p>
+                  </div>
+                  <Switch
+                    checked={settings.enable_alerts}
+                    onCheckedChange={(checked) => handleChange('enable_alerts', checked)}
+                  />
+                </div>
+                <Separator className="bg-gray-700" />
+                <div>
+                  <Label htmlFor="cpu_alert_threshold" className="text-white">CPU Alert Threshold (%)</Label>
+                  <Input
+                    id="cpu_alert_threshold"
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={settings.cpu_alert_threshold}
+                    onChange={(e) => handleChange('cpu_alert_threshold', parseInt(e.target.value))}
+                    className="bg-gray-900 border-gray-700 text-white mt-2"
+                    disabled={!settings.enable_alerts}
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Alert when CPU usage exceeds this percentage</p>
+                </div>
+                <div>
+                  <Label htmlFor="memory_alert_threshold" className="text-white">Memory Alert Threshold (%)</Label>
+                  <Input
+                    id="memory_alert_threshold"
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={settings.memory_alert_threshold}
+                    onChange={(e) => handleChange('memory_alert_threshold', parseInt(e.target.value))}
+                    className="bg-gray-900 border-gray-700 text-white mt-2"
+                    disabled={!settings.enable_alerts}
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Alert when memory usage exceeds this percentage</p>
+                </div>
+                <div>
+                  <Label htmlFor="disk_alert_threshold" className="text-white">Disk Alert Threshold (%)</Label>
+                  <Input
+                    id="disk_alert_threshold"
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={settings.disk_alert_threshold}
+                    onChange={(e) => handleChange('disk_alert_threshold', parseInt(e.target.value))}
+                    className="bg-gray-900 border-gray-700 text-white mt-2"
+                    disabled={!settings.enable_alerts}
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Alert when disk usage exceeds this percentage</p>
+                </div>
+              </div>
+            </div>
+
             {/* Info Box */}
             <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4 flex gap-3">
               <AlertCircle className="text-blue-400 mt-0.5 flex-shrink-0" size={20} />
