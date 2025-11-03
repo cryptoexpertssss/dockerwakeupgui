@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Trash2, RefreshCw } from 'lucide-react';
+import { Trash2, RefreshCw, Download, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import Sidebar from '../components/Sidebar';
+import PullImageModal from '../components/PullImageModal';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,21 +14,27 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../components/ui/alert-dialog';
+import { Input } from '../components/ui/input';
+import { Button } from '../components/ui/button';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 const Images = () => {
   const [images, setImages] = useState([]);
+  const [filteredImages, setFilteredImages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showPruneDialog, setShowPruneDialog] = useState(false);
+  const [showPullModal, setShowPullModal] = useState(false);
   const [pruning, setPruning] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const fetchImages = async () => {
     setLoading(true);
     try {
       const response = await axios.get(`${API}/images`);
       setImages(response.data.images || []);
+      setFilteredImages(response.data.images || []);
     } catch (error) {
       console.error('Error fetching images:', error);
       toast.error('Failed to fetch images');
@@ -39,6 +46,19 @@ const Images = () => {
   useEffect(() => {
     fetchImages();
   }, []);
+
+  useEffect(() => {
+    if (searchQuery) {
+      const filtered = images.filter(img =>
+        img.repository.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        img.tag.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        img.id.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+      setFilteredImages(filtered);
+    } else {
+      setFilteredImages(images);
+    }
+  }, [searchQuery, images]);
 
   const handlePrune = async () => {
     setPruning(true);
@@ -55,8 +75,13 @@ const Images = () => {
     }
   };
 
+  const handlePullSuccess = () => {
+    setShowPullModal(false);
+    fetchImages();
+  };
+
   return (
-    <div className="flex h-screen bg-gradient-to-br from-[#0a0a0f] via-[#13131a] to-[#0a0a0f]">
+    <div className="flex h-screen bg-gradient-to-br from-[var(--bg-primary)] via-[var(--bg-secondary)] to-[var(--bg-primary)]">
       <Sidebar active="images" />
       
       <div className="flex-1 overflow-auto">
@@ -68,26 +93,48 @@ const Images = () => {
                 <h1 className="text-4xl font-bold text-white mb-2" data-testid="images-title">
                   Docker Images
                 </h1>
-                <p className="text-gray-400">{images.length} images</p>
+                <p className="text-gray-400">{filteredImages.length} of {images.length} images</p>
               </div>
               <div className="flex gap-3">
-                <button
+                <Button
+                  onClick={() => setShowPullModal(true)}
+                  className="bg-purple-600 hover:bg-purple-700"
+                  data-testid="pull-image-button"
+                >
+                  <Download size={18} className="mr-2" />
+                  Pull Image
+                </Button>
+                <Button
                   onClick={fetchImages}
+                  className="bg-gray-700 hover:bg-gray-600"
                   data-testid="refresh-images-button"
-                  className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
                 >
-                  <RefreshCw size={18} />
+                  <RefreshCw size={18} className="mr-2" />
                   Refresh
-                </button>
-                <button
+                </Button>
+                <Button
                   onClick={() => setShowPruneDialog(true)}
+                  className="bg-red-600 hover:bg-red-700"
                   data-testid="prune-images-button"
-                  className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
                 >
-                  <Trash2 size={18} />
+                  <Trash2 size={18} className="mr-2" />
                   Prune Unused
-                </button>
+                </Button>
               </div>
+            </div>
+          </div>
+
+          {/* Search */}
+          <div className="mb-6">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+              <Input
+                placeholder="Search images by repository, tag, or ID..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="bg-gray-800/40 border-gray-700 text-white pl-10"
+                data-testid="search-images"
+              />
             </div>
           </div>
 
@@ -111,7 +158,7 @@ const Images = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700">
-                    {images.map((image, index) => (
+                    {filteredImages.map((image, index) => (
                       <tr key={`${image.id}-${index}`} className="hover:bg-gray-700/30 transition-colors" data-testid={`image-row-${index}`}>
                         <td className="px-6 py-4 text-sm text-white font-medium">{image.repository}</td>
                         <td className="px-6 py-4 text-sm text-gray-300">
@@ -129,6 +176,14 @@ const Images = () => {
           </div>
         </div>
       </div>
+
+      {/* Pull Image Modal */}
+      {showPullModal && (
+        <PullImageModal
+          onClose={() => setShowPullModal(false)}
+          onSuccess={handlePullSuccess}
+        />
+      )}
 
       {/* Prune Confirmation Dialog */}
       <AlertDialog open={showPruneDialog} onOpenChange={setShowPruneDialog}>
