@@ -229,6 +229,73 @@ const CreateContainerModal = ({ containers, onClose, onSuccess }) => {
                 </div>
 
                 <div>
+                  <Label htmlFor="route" className="text-white">Route / URL (Optional)</Label>
+                  <Input
+                    id="route"
+                    data-testid="route-input"
+                    value={formData.route}
+                    onChange={(e) => handleInputChange('route', e.target.value)}
+                    placeholder="/api or https://example.com"
+                    className="bg-gray-800 border-gray-700 text-white mt-2"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">URL route or domain where this container is accessible</p>
+                </div>
+
+                <div>
+                  <Label htmlFor="docker_url" className="text-white">Docker URL & Port (Optional)</Label>
+                  <Input
+                    id="docker_url"
+                    data-testid="docker-url-input"
+                    value={formData.docker_url}
+                    onChange={(e) => handleInputChange('docker_url', e.target.value)}
+                    placeholder="http://localhost:8080 or container-name:3000"
+                    className="bg-gray-800 border-gray-700 text-white mt-2"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Internal Docker URL where the container is running</p>
+                </div>
+
+                <div>
+                  <Label className="text-white">Deployment Type</Label>
+                  <Select value={formData.deployment_type} onValueChange={(value) => handleInputChange('deployment_type', value)}>
+                    <SelectTrigger className="bg-gray-800 border-gray-700 text-white mt-2" data-testid="deployment-type-select">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-gray-800 border-gray-700 text-white">
+                      <SelectItem value="docker_run">Docker Run</SelectItem>
+                      <SelectItem value="compose">Docker Compose</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {formData.deployment_type === 'compose' ? (
+                  <div>
+                    <Label htmlFor="docker_path" className="text-white">Docker Compose Path</Label>
+                    <Input
+                      id="docker_path"
+                      data-testid="docker-path-input"
+                      value={formData.docker_path}
+                      onChange={(e) => handleInputChange('docker_path', e.target.value)}
+                      placeholder="/opt/myapp/docker-compose.yml"
+                      className="bg-gray-800 border-gray-700 text-white mt-2"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Path to docker-compose.yml file</p>
+                  </div>
+                ) : (
+                  <div>
+                    <Label htmlFor="run_command" className="text-white">Docker Run Command Used</Label>
+                    <Input
+                      id="run_command"
+                      data-testid="run-command-input"
+                      value={formData.run_command}
+                      onChange={(e) => handleInputChange('run_command', e.target.value)}
+                      placeholder="docker run -d -p 80:80 nginx:latest"
+                      className="bg-gray-800 border-gray-700 text-white mt-2"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Original docker run command used to spin this container</p>
+                  </div>
+                )}
+
+                <div>
                   <Label htmlFor="command" className="text-white">Command (Optional)</Label>
                   <Input
                     id="command"
@@ -249,7 +316,7 @@ const CreateContainerModal = ({ containers, onClose, onSuccess }) => {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="bg-gray-800 border-gray-700 text-white">
-                        <SelectItem value="no">No</SelectItem>
+                        <SelectItem value="no">Never</SelectItem>
                         <SelectItem value="always">Always</SelectItem>
                         <SelectItem value="unless-stopped">Unless Stopped</SelectItem>
                         <SelectItem value="on-failure">On Failure</SelectItem>
@@ -258,16 +325,32 @@ const CreateContainerModal = ({ containers, onClose, onSuccess }) => {
                   </div>
 
                   <div>
-                    <Label htmlFor="idle_timeout" className="text-white">Idle Timeout (seconds)</Label>
-                    <Input
-                      id="idle_timeout"
-                      type="number"
-                      data-testid="idle-timeout-input"
-                      value={formData.idle_timeout}
-                      onChange={(e) => handleInputChange('idle_timeout', e.target.value)}
-                      placeholder="3600"
-                      className="bg-gray-800 border-gray-700 text-white mt-2"
-                    />
+                    <Label htmlFor="idle_timeout" className="text-white">Idle Timeout</Label>
+                    <Select 
+                      value={formData.idle_timeout || 'never'} 
+                      onValueChange={(value) => handleInputChange('idle_timeout', value === 'never' ? '' : value)}
+                    >
+                      <SelectTrigger className="bg-gray-800 border-gray-700 text-white mt-2" data-testid="idle-timeout-select">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-gray-800 border-gray-700 text-white">
+                        <SelectItem value="never">Never</SelectItem>
+                        <SelectItem value="300">5 minutes (300s)</SelectItem>
+                        <SelectItem value="600">10 minutes (600s)</SelectItem>
+                        <SelectItem value="1800">30 minutes (1800s)</SelectItem>
+                        <SelectItem value="3600">1 hour (3600s)</SelectItem>
+                        <SelectItem value="7200">2 hours (7200s)</SelectItem>
+                        <SelectItem value="custom">Custom...</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {formData.idle_timeout === 'custom' && (
+                      <Input
+                        type="number"
+                        placeholder="Custom timeout in seconds"
+                        onChange={(e) => handleInputChange('idle_timeout', e.target.value)}
+                        className="bg-gray-800 border-gray-700 text-white mt-2"
+                      />
+                    )}
                   </div>
                 </div>
 
