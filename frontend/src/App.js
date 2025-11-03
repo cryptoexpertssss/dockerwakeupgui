@@ -7,6 +7,9 @@ import Settings from './pages/Settings';
 import Volumes from './pages/Volumes';
 import Networks from './pages/Networks';
 import SystemInfo from './pages/SystemInfo';
+import Analytics from './pages/Analytics';
+import Alerts from './pages/Alerts';
+import Templates from './pages/Templates';
 import { Toaster } from './components/ui/sonner';
 import { ThemeProvider } from './context/ThemeContext';
 import CommandPalette from './components/CommandPalette';
@@ -21,6 +24,9 @@ function App() {
           <CommandPalette />
           <Routes>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/analytics" element={<Analytics />} />
+            <Route path="/alerts" element={<Alerts />} />
+            <Route path="/templates" element={<Templates />} />
             <Route path="/images" element={<Images />} />
             <Route path="/volumes" element={<Volumes />} />
             <Route path="/networks" element={<Networks />} />
