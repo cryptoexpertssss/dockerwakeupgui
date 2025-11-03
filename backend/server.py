@@ -280,6 +280,12 @@ def get_container_info(container):
             "mac_address": network_settings.get('MacAddress', 'N/A'),
             "network_mode": container.attrs['HostConfig'].get('NetworkMode', 'default'),
             "labels": container.labels,
+            "route": route,
+            "docker_url": docker_url,
+            "docker_path": docker_path,
+            "deployment_type": deployment_type,
+            "run_command": run_command,
+            "idle_timeout": idle_timeout,
             "stats": {
                 "cpu_percent": round(cpu_percent, 2),
                 "memory_mb": round(mem_usage, 2),
