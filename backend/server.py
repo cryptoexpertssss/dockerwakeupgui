@@ -249,6 +249,15 @@ def get_container_info(container):
         domainname = container.attrs['Config'].get('Domainname', '')
         health_status = container.attrs['State'].get('Health', {}).get('Status', None)
         
+        # Extract metadata from labels
+        labels = container.labels or {}
+        route = labels.get('dockerwakeup.route', '')
+        docker_url = labels.get('dockerwakeup.docker_url', '')
+        docker_path = labels.get('dockerwakeup.docker_path', '')
+        deployment_type = labels.get('dockerwakeup.deployment_type', 'docker_run')
+        run_command = labels.get('dockerwakeup.run_command', '')
+        idle_timeout = labels.get('dockerwakeup.idle_timeout', '')
+        
         return {
             "id": container.short_id,
             "name": container.name,
