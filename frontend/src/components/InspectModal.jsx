@@ -74,6 +74,39 @@ const InspectModal = ({ containerName, onClose }) => {
                   </div>
                 </div>
 
+                {/* DockerWakeUp Metadata */}
+                {(inspectData?.Config?.Labels?.['dockerwakeup.route'] || 
+                  inspectData?.Config?.Labels?.['dockerwakeup.docker_url'] ||
+                  inspectData?.Config?.Labels?.['dockerwakeup.docker_path'] ||
+                  inspectData?.Config?.Labels?.['dockerwakeup.run_command']) && (
+                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
+                    <h3 className="text-blue-400 font-semibold mb-3">DockerWakeUp Metadata</h3>
+                    <div className="space-y-2 text-sm">
+                      {inspectData?.Config?.Labels?.['dockerwakeup.route'] && (
+                        <div><span className="text-gray-400">Route:</span> <span className="text-white font-mono">{inspectData.Config.Labels['dockerwakeup.route']}</span></div>
+                      )}
+                      {inspectData?.Config?.Labels?.['dockerwakeup.docker_url'] && (
+                        <div><span className="text-gray-400">Docker URL:</span> <span className="text-white font-mono">{inspectData.Config.Labels['dockerwakeup.docker_url']}</span></div>
+                      )}
+                      {inspectData?.Config?.Labels?.['dockerwakeup.deployment_type'] && (
+                        <div><span className="text-gray-400">Deployment Type:</span> <span className="text-white capitalize">{inspectData.Config.Labels['dockerwakeup.deployment_type'].replace('_', ' ')}</span></div>
+                      )}
+                      {inspectData?.Config?.Labels?.['dockerwakeup.docker_path'] && (
+                        <div><span className="text-gray-400">Docker Compose Path:</span> <span className="text-white font-mono text-xs">{inspectData.Config.Labels['dockerwakeup.docker_path']}</span></div>
+                      )}
+                      {inspectData?.Config?.Labels?.['dockerwakeup.run_command'] && (
+                        <div className="col-span-2">
+                          <span className="text-gray-400">Run Command:</span>
+                          <div className="text-white font-mono text-xs mt-1 bg-gray-900/50 p-2 rounded break-all">{inspectData.Config.Labels['dockerwakeup.run_command']}</div>
+                        </div>
+                      )}
+                      {inspectData?.Config?.Labels?.['dockerwakeup.idle_timeout'] && (
+                        <div><span className="text-gray-400">Idle Timeout:</span> <span className="text-white">{inspectData.Config.Labels['dockerwakeup.idle_timeout']}s</span></div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="bg-gray-800/50 rounded-lg p-4">
                   <h3 className="text-white font-semibold mb-3">State</h3>
                   <div className="grid grid-cols-2 gap-3 text-sm">
