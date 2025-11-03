@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import { Play, Square, RotateCw, Trash2, Pause, FileText } from 'lucide-react';
+import { Play, Square, RotateCw, Trash2, Pause, FileText, Network } from 'lucide-react';
 import { toast } from 'sonner';
 import LogsModal from './LogsModal';
+import NetworkInfoModal from './NetworkInfoModal';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -10,6 +11,7 @@ const API = `${BACKEND_URL}/api`;
 const ContainerCard = ({ container, selected, onSelect, onActionComplete, style }) => {
   const [loading, setLoading] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  const [showNetworkInfo, setShowNetworkInfo] = useState(false);
 
   const handleAction = async (action) => {
     setLoading(true);
