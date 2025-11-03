@@ -74,6 +74,38 @@ class CreateContainerRequest(BaseModel):
     auto_remove: bool = False
     labels: Dict[str, str] = {}
 
+class Settings(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    
+    # System Settings
+    poll_interval: int = 5  # seconds
+    auto_refresh: bool = True
+    ws_update_interval: int = 3  # seconds for WebSocket updates
+    
+    # Container Defaults
+    default_restart_policy: str = "unless-stopped"
+    default_network_mode: str = "bridge"
+    default_idle_timeout: int = 3600  # seconds
+    
+    # Display Settings
+    theme: str = "dark"  # dark or light
+    containers_per_page: int = 50
+    show_stopped_containers: bool = True
+    
+    # Notifications
+    enable_notifications: bool = True
+    notify_on_container_stop: bool = True
+    notify_on_container_start: bool = False
+    notify_on_errors: bool = True
+    
+    # Advanced
+    docker_socket_path: str = "/var/run/docker.sock"
+    log_retention_days: int = 30
+    enable_auto_prune: bool = False
+    auto_prune_schedule: str = "weekly"  # daily, weekly, monthly
+    
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 class ActivityLog(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -468,6 +500,61 @@ async def get_activity_logs(limit: int = 50):
 async def system_metrics():
     """Get system metrics"""
     return get_system_metrics()
+
+
+# Settings endpoints
+@api_router.get("/settings")
+async def get_settings():
+    """Get application settings"""
+    try:
+        settings_doc = await db.settings.find_one({}, {"_id": 0})
+        if not settings_doc:
+            # Return default settings if none exist
+            default_settings = Settings()
+            return default_settings.model_dump()
+        return settings_doc
+    except Exception as e:
+        logging.error(f"Error getting settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/settings")
+async def update_settings(settings: Settings):
+    """Update application settings"""
+    try:
+        settings_dict = settings.model_dump()
+        settings_dict['updated_at'] = datetime.now(timezone.utc).isoformat()
+        
+        # Upsert settings (update if exists, insert if not)
+        await db.settings.delete_many({})  # Only keep one settings document
+        await db.settings.insert_one(settings_dict)
+        
+        await log_activity("update_settings", None, "success", "Application settings updated")
+        await manager.broadcast({"type": "settings_updated", "settings": settings_dict})
+        
+        return {"success": True, "message": "Settings updated successfully"}
+    except Exception as e:
+        logging.error(f"Error updating settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/settings/reset")
+async def reset_settings():
+    """Reset settings to defaults"""
+    try:
+        default_settings = Settings()
+        settings_dict = default_settings.model_dump()
+        settings_dict['updated_at'] = datetime.now(timezone.utc).isoformat()
+        
+        await db.settings.delete_many({})
+        await db.settings.insert_one(settings_dict)
+        
+        await log_activity("reset_settings", None, "success", "Settings reset to defaults")
+        
+        return {"success": True, "message": "Settings reset to defaults", "settings": settings_dict}
+    except Exception as e:
+        logging.error(f"Error resetting settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # WebSocket endpoint
