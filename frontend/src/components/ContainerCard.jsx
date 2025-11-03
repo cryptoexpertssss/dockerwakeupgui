@@ -127,7 +127,7 @@ const ContainerCard = ({ container, selected, onSelect, onActionComplete, style 
               onClick={() => handleAction('unpause')}
               disabled={loading}
               data-testid={`unpause-${container.name}`}
-              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm transition-colors disabled:opacity-50"
+              className="col-span-6 flex items-center justify-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm transition-colors disabled:opacity-50"
             >
               <Play size={14} />
               Unpause
@@ -137,7 +137,7 @@ const ContainerCard = ({ container, selected, onSelect, onActionComplete, style 
               onClick={() => handleAction('start')}
               disabled={loading}
               data-testid={`start-${container.name}`}
-              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm transition-colors disabled:opacity-50"
+              className="col-span-6 flex items-center justify-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm transition-colors disabled:opacity-50"
             >
               <Play size={14} />
               Start
@@ -147,14 +147,24 @@ const ContainerCard = ({ container, selected, onSelect, onActionComplete, style 
             onClick={() => handleAction('restart')}
             disabled={loading}
             data-testid={`restart-${container.name}`}
-            className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50"
+            className="col-span-2 p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50"
+            title="Restart"
           >
             <RotateCw size={14} />
           </button>
           <button
+            onClick={() => setShowNetworkInfo(true)}
+            data-testid={`network-${container.name}`}
+            className="col-span-2 p-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
+            title="Network Info"
+          >
+            <Network size={14} />
+          </button>
+          <button
             onClick={() => setShowLogs(true)}
             data-testid={`logs-${container.name}`}
-            className="p-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors"
+            className="col-span-2 p-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors"
+            title="View Logs"
           >
             <FileText size={14} />
           </button>
@@ -162,7 +172,8 @@ const ContainerCard = ({ container, selected, onSelect, onActionComplete, style 
             onClick={() => handleAction('remove')}
             disabled={loading}
             data-testid={`remove-${container.name}`}
-            className="p-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors disabled:opacity-50"
+            className="col-span-6 p-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors disabled:opacity-50"
+            title="Remove"
           >
             <Trash2 size={14} />
           </button>
@@ -173,6 +184,13 @@ const ContainerCard = ({ container, selected, onSelect, onActionComplete, style 
         <LogsModal
           containerName={container.name}
           onClose={() => setShowLogs(false)}
+        />
+      )}
+
+      {showNetworkInfo && (
+        <NetworkInfoModal
+          container={container}
+          onClose={() => setShowNetworkInfo(false)}
         />
       )}
     </>
