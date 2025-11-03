@@ -4,8 +4,12 @@ import Dashboard from './pages/Dashboard';
 import Images from './pages/Images';
 import Logs from './pages/Logs';
 import Settings from './pages/Settings';
+import Volumes from './pages/Volumes';
+import Networks from './pages/Networks';
+import SystemInfo from './pages/SystemInfo';
 import { Toaster } from './components/ui/sonner';
 import { ThemeProvider } from './context/ThemeContext';
+import CommandPalette from './components/CommandPalette';
 import './App.css';
 
 function App() {
@@ -13,10 +17,14 @@ function App() {
     <ThemeProvider>
       <div className="App">
         <Toaster position="top-right" />
+        <CommandPalette />
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/images" element={<Images />} />
+            <Route path="/volumes" element={<Volumes />} />
+            <Route path="/networks" element={<Networks />} />
+            <Route path="/system" element={<SystemInfo />} />
             <Route path="/logs" element={<Logs />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>

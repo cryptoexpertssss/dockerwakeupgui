@@ -1,13 +1,14 @@
 import React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Image, Activity, Settings } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { LayoutDashboard, Image, Activity, Settings, HardDrive, Wifi, Server } from 'lucide-react';
 
 const Sidebar = ({ active }) => {
-  const navigate = useNavigate();
-
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/' },
     { id: 'images', label: 'Images', icon: Image, path: '/images' },
+    { id: 'volumes', label: 'Volumes', icon: HardDrive, path: '/volumes' },
+    { id: 'networks', label: 'Networks', icon: Wifi, path: '/networks' },
+    { id: 'system', label: 'System Info', icon: Server, path: '/system' },
     { id: 'logs', label: 'Activity Logs', icon: Activity, path: '/logs' },
     { id: 'settings', label: 'Settings', icon: Settings, path: '/settings' },
   ];
@@ -17,7 +18,7 @@ const Sidebar = ({ active }) => {
       {/* Logo */}
       <div className="p-6 border-b border-gray-800">
         <h1 className="text-2xl font-bold text-white" data-testid="sidebar-logo">DockerWakeUp</h1>
-        <p className="text-xs text-gray-400 mt-1">WebUI v1.0</p>
+        <p className="text-xs text-gray-400 mt-1">WebUI v2.0</p>
       </div>
 
       {/* Menu */}
