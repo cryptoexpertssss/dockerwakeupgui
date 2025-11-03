@@ -74,6 +74,12 @@ class CreateContainerRequest(BaseModel):
     detach: bool = True
     auto_remove: bool = False
     labels: Dict[str, str] = {}
+    # New metadata fields
+    route: Optional[str] = None
+    docker_url: Optional[str] = None
+    docker_path: Optional[str] = None
+    deployment_type: str = "docker_run"  # 'docker_run' or 'compose'
+    run_command: Optional[str] = None
 
 class CreateVolumeRequest(BaseModel):
     name: str
