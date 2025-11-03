@@ -17,8 +17,8 @@ function App() {
     <ThemeProvider>
       <div className="App">
         <Toaster position="top-right" />
-        <CommandPalette />
         <BrowserRouter>
+          <CommandPalette />
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/images" element={<Images />} />
