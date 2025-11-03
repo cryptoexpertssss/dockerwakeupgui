@@ -1,14 +1,20 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import json
+import asyncio
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List
+from typing import List, Dict, Any, Optional
 import uuid
 from datetime import datetime, timezone
+import docker
+import psutil
+import subprocess
 
 
 ROOT_DIR = Path(__file__).parent
@@ -16,55 +22,364 @@ load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+client_mongo = AsyncIOMotorClient(mongo_url)
+db = client_mongo[os.environ['DB_NAME']]
 
-# Create the main app without a prefix
+# Docker client
+try:
+    docker_client = docker.from_env()
+    DOCKER_AVAILABLE = True
+except Exception as e:
+    logging.error(f"Docker not available: {e}")
+    docker_client = None
+    DOCKER_AVAILABLE = False
+
+# Create the main app
 app = FastAPI()
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
+# Models
+class ContainerAction(BaseModel):
+    action: str  # start, stop, pause, restart, remove
+
+class BulkAction(BaseModel):
+    container_names: List[str]
+    action: str
+
+class ActivityLog(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
+    event_type: str
+    container_name: Optional[str] = None
+    status: str
+    message: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
 
-# Add your routes to the router instead of directly to app
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except:
+                pass
+
+manager = ConnectionManager()
+
+
+# Helper functions
+def get_container_info(container):
+    """Extract container information"""
+    try:
+        stats = container.stats(stream=False)
+        
+        # CPU calculation
+        cpu_delta = stats['cpu_stats']['cpu_usage']['total_usage'] - stats['precpu_stats']['cpu_usage']['total_usage']
+        system_delta = stats['cpu_stats']['system_cpu_usage'] - stats['precpu_stats']['system_cpu_usage']
+        cpu_percent = (cpu_delta / system_delta) * len(stats['cpu_stats']['cpu_usage'].get('percpu_usage', [0])) * 100 if system_delta > 0 else 0
+        
+        # Memory
+        mem_usage = stats['memory_stats'].get('usage', 0) / (1024 * 1024)  # MB
+        mem_limit = stats['memory_stats'].get('limit', 1) / (1024 * 1024)
+        
+        # Network
+        networks = stats.get('networks', {})
+        
+        # Ports
+        ports = []
+        if container.ports:
+            for container_port, host_bindings in container.ports.items():
+                if host_bindings:
+                    for binding in host_bindings:
+                        ports.append(f"{binding['HostPort']}->{container_port}")
+                else:
+                    ports.append(container_port)
+        
+        return {
+            "id": container.short_id,
+            "name": container.name,
+            "status": container.status,
+            "state": container.attrs['State']['Status'],
+            "image": container.image.tags[0] if container.image.tags else container.image.short_id,
+            "created": container.attrs['Created'],
+            "type": "compose" if container.labels.get('com.docker.compose.project') else "docker_run",
+            "compose_project": container.labels.get('com.docker.compose.project', ''),
+            "ports": ports,
+            "networks": list(container.attrs['NetworkSettings']['Networks'].keys()),
+            "stats": {
+                "cpu_percent": round(cpu_percent, 2),
+                "memory_mb": round(mem_usage, 2),
+                "memory_limit_mb": round(mem_limit, 2),
+                "memory_percent": round((mem_usage / mem_limit * 100) if mem_limit > 0 else 0, 2)
+            }
+        }
+    except Exception as e:
+        logging.error(f"Error getting container info for {container.name}: {e}")
+        return {
+            "id": container.short_id,
+            "name": container.name,
+            "status": container.status,
+            "state": "unknown",
+            "image": "unknown",
+            "created": "",
+            "type": "unknown",
+            "compose_project": "",
+            "ports": [],
+            "networks": [],
+            "stats": {"cpu_percent": 0, "memory_mb": 0, "memory_limit_mb": 0, "memory_percent": 0}
+        }
+
+
+def get_system_metrics():
+    """Get system-level metrics"""
+    cpu_percent = psutil.cpu_percent(interval=0.1)
+    memory = psutil.virtual_memory()
+    disk = psutil.disk_usage('/')
+    
+    return {
+        "cpu_percent": round(cpu_percent, 2),
+        "memory_percent": round(memory.percent, 2),
+        "memory_used_mb": round(memory.used / (1024 * 1024), 2),
+        "memory_total_mb": round(memory.total / (1024 * 1024), 2),
+        "disk_percent": round(disk.percent, 2),
+        "disk_used_gb": round(disk.used / (1024 * 1024 * 1024), 2),
+        "disk_total_gb": round(disk.total / (1024 * 1024 * 1024), 2)
+    }
+
+
+async def log_activity(event_type: str, container_name: str = None, status: str = "success", message: str = ""):
+    """Log activity to MongoDB"""
+    try:
+        activity = ActivityLog(
+            event_type=event_type,
+            container_name=container_name,
+            status=status,
+            message=message
+        )
+        doc = activity.model_dump()
+        doc['timestamp'] = doc['timestamp'].isoformat()
+        await db.activity_logs.insert_one(doc)
+    except Exception as e:
+        logging.error(f"Error logging activity: {e}")
+
+
+# API Routes
 @api_router.get("/")
 async def root():
-    return {"message": "Hello World"}
+    return {"message": "DockerWakeUp WebUI API", "version": "1.0.0", "docker_available": DOCKER_AVAILABLE}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
+@api_router.get("/containers")
+async def list_containers():
+    """List all containers"""
+    if not DOCKER_AVAILABLE:
+        return JSONResponse({"error": "Docker not available"}, status_code=503)
     
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
+    try:
+        containers = docker_client.containers.list(all=True)
+        container_list = [get_container_info(c) for c in containers]
+        return {"containers": container_list, "count": len(container_list)}
+    except Exception as e:
+        logging.error(f"Error listing containers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/container/{container_name}/{action}")
+async def container_action(container_name: str, action: str):
+    """Perform action on a container"""
+    if not DOCKER_AVAILABLE:
+        return JSONResponse({"error": "Docker not available"}, status_code=503)
     
-    return status_checks
+    try:
+        container = docker_client.containers.get(container_name)
+        
+        if action == "start":
+            container.start()
+            message = f"Container {container_name} started"
+        elif action == "stop":
+            container.stop()
+            message = f"Container {container_name} stopped"
+        elif action == "pause":
+            container.pause()
+            message = f"Container {container_name} paused"
+        elif action == "unpause":
+            container.unpause()
+            message = f"Container {container_name} unpaused"
+        elif action == "restart":
+            container.restart()
+            message = f"Container {container_name} restarted"
+        elif action == "remove":
+            container.remove(force=True)
+            message = f"Container {container_name} removed"
+        else:
+            raise HTTPException(status_code=400, detail="Invalid action")
+        
+        await log_activity(action, container_name, "success", message)
+        await manager.broadcast({"type": "container_event", "action": action, "container": container_name, "status": "success"})
+        
+        return {"success": True, "message": message}
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Container not found")
+    except Exception as e:
+        await log_activity(action, container_name, "error", str(e))
+        logging.error(f"Error performing {action} on {container_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/containers/bulk")
+async def bulk_action(bulk: BulkAction):
+    """Perform bulk action on multiple containers"""
+    if not DOCKER_AVAILABLE:
+        return JSONResponse({"error": "Docker not available"}, status_code=503)
+    
+    results = []
+    for container_name in bulk.container_names:
+        try:
+            container = docker_client.containers.get(container_name)
+            
+            if bulk.action == "start":
+                container.start()
+            elif bulk.action == "stop":
+                container.stop()
+            elif bulk.action == "restart":
+                container.restart()
+            elif bulk.action == "remove":
+                container.remove(force=True)
+            
+            results.append({"container": container_name, "success": True})
+            await log_activity(bulk.action, container_name, "success", f"Bulk {bulk.action} successful")
+        except Exception as e:
+            results.append({"container": container_name, "success": False, "error": str(e)})
+            await log_activity(bulk.action, container_name, "error", str(e))
+    
+    await manager.broadcast({"type": "bulk_action", "action": bulk.action, "results": results})
+    return {"results": results}
+
+
+@api_router.get("/logs/{container_name}")
+async def get_logs(container_name: str, tail: int = 100):
+    """Get container logs"""
+    if not DOCKER_AVAILABLE:
+        return JSONResponse({"error": "Docker not available"}, status_code=503)
+    
+    try:
+        container = docker_client.containers.get(container_name)
+        logs = container.logs(tail=tail).decode('utf-8')
+        return {"container": container_name, "logs": logs}
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Container not found")
+    except Exception as e:
+        logging.error(f"Error getting logs for {container_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/images")
+async def list_images():
+    """List all Docker images"""
+    if not DOCKER_AVAILABLE:
+        return JSONResponse({"error": "Docker not available"}, status_code=503)
+    
+    try:
+        images = docker_client.images.list()
+        image_list = []
+        
+        for img in images:
+            tags = img.tags if img.tags else ["<none>"]
+            for tag in tags:
+                repo_tag = tag.split(":")
+                image_list.append({
+                    "id": img.short_id.replace("sha256:", ""),
+                    "repository": repo_tag[0] if len(repo_tag) > 0 else "<none>",
+                    "tag": repo_tag[1] if len(repo_tag) > 1 else "<none>",
+                    "size_mb": round(img.attrs['Size'] / (1024 * 1024), 2),
+                    "created": img.attrs['Created']
+                })
+        
+        return {"images": image_list, "count": len(image_list)}
+    except Exception as e:
+        logging.error(f"Error listing images: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/images/prune")
+async def prune_images():
+    """Prune unused images"""
+    if not DOCKER_AVAILABLE:
+        return JSONResponse({"error": "Docker not available"}, status_code=503)
+    
+    try:
+        result = docker_client.images.prune(filters={'dangling': False})
+        space_reclaimed = result.get('SpaceReclaimed', 0) / (1024 * 1024)  # MB
+        
+        await log_activity("prune_images", None, "success", f"Reclaimed {space_reclaimed:.2f} MB")
+        await manager.broadcast({"type": "image_event", "action": "prune", "space_reclaimed_mb": space_reclaimed})
+        
+        return {"success": True, "space_reclaimed_mb": round(space_reclaimed, 2), "images_deleted": len(result.get('ImagesDeleted', []))}
+    except Exception as e:
+        logging.error(f"Error pruning images: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/activity-logs")
+async def get_activity_logs(limit: int = 50):
+    """Get activity logs"""
+    try:
+        logs = await db.activity_logs.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit).to_list(limit)
+        return {"logs": logs, "count": len(logs)}
+    except Exception as e:
+        logging.error(f"Error getting activity logs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/system/metrics")
+async def system_metrics():
+    """Get system metrics"""
+    return get_system_metrics()
+
+
+# WebSocket endpoint
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        # Send initial system metrics
+        await websocket.send_json({"type": "system_metrics", "data": get_system_metrics()})
+        
+        # Keep connection alive and send periodic updates
+        while True:
+            try:
+                # Wait for client message or timeout
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=3.0)
+            except asyncio.TimeoutError:
+                # Send periodic updates
+                if DOCKER_AVAILABLE:
+                    try:
+                        containers = docker_client.containers.list(all=True)
+                        container_stats = [get_container_info(c) for c in containers]
+                        await websocket.send_json({"type": "container_stats", "data": container_stats})
+                    except:
+                        pass
+                
+                await websocket.send_json({"type": "system_metrics", "data": get_system_metrics()})
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        logging.error(f"WebSocket error: {e}")
+        manager.disconnect(websocket)
+
 
 # Include the router in the main app
 app.include_router(api_router)
@@ -86,4 +401,4 @@ logger = logging.getLogger(__name__)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    client.close()
+    client_mongo.close()
