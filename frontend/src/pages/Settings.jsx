@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Save, RotateCcw, AlertCircle } from 'lucide-react';
+import { Save, RotateCcw, AlertCircle, Sun, Moon } from 'lucide-react';
 import { toast } from 'sonner';
 import Sidebar from '../components/Sidebar';
 import { Button } from '../components/ui/button';
@@ -9,6 +9,7 @@ import { Label } from '../components/ui/label';
 import { Switch } from '../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Separator } from '../components/ui/separator';
+import { useTheme } from '../context/ThemeContext';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,6 +25,7 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 const Settings = () => {
+  const { theme, setTheme: setThemeContext } = useTheme();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showResetDialog, setShowResetDialog] = useState(false);
@@ -75,6 +77,11 @@ const Settings = () => {
 
   const handleChange = (field, value) => {
     setSettings(prev => ({ ...prev, [field]: value }));
+    
+    // If theme is changed, apply it immediately
+    if (field === 'theme') {
+      setThemeContext(value);
+    }
   };
 
   const handleSave = async () => {
@@ -94,6 +101,7 @@ const Settings = () => {
     try {
       const response = await axios.post(`${API}/settings/reset`);
       setSettings(response.data.settings);
+      setThemeContext(response.data.settings.theme);
       setShowResetDialog(false);
       toast.success('Settings reset to defaults');
     } catch (error) {
@@ -104,7 +112,7 @@ const Settings = () => {
 
   if (loading) {
     return (
-      <div className="flex h-screen bg-gradient-to-br from-[#0a0a0f] via-[#13131a] to-[#0a0a0f]">
+      <div className="flex h-screen bg-gradient-to-br from-[var(--bg-primary)] via-[var(--bg-secondary)] to-[var(--bg-primary)]">
         <Sidebar active="settings" />
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
@@ -117,7 +125,7 @@ const Settings = () => {
   }
 
   return (
-    <div className="flex h-screen bg-gradient-to-br from-[#0a0a0f] via-[#13131a] to-[#0a0a0f]">
+    <div className="flex h-screen bg-gradient-to-br from-[var(--bg-primary)] via-[var(--bg-secondary)] to-[var(--bg-primary)]">
       <Sidebar active="settings" />
       
       <div className="flex-1 overflow-auto">
@@ -155,6 +163,31 @@ const Settings = () => {
           </div>
 
           <div className="space-y-8">
+            {/* Theme Toggle - Quick Access */}
+            <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700 rounded-lg p-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-lg">
+                    {theme === 'dark' ? <Moon size={24} className="text-blue-400" /> : <Sun size={24} className="text-yellow-500" />}
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-semibold text-white">Theme</h2>
+                    <p className="text-sm text-gray-400 mt-1">Switch between dark and light mode</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className={`text-sm ${theme === 'dark' ? 'text-white font-semibold' : 'text-gray-400'}`}>Dark</span>
+                  <Switch
+                    checked={settings.theme === 'light'}
+                    onCheckedChange={(checked) => handleChange('theme', checked ? 'light' : 'dark')}
+                    data-testid="theme-toggle"
+                    className="data-[state=checked]:bg-yellow-500"
+                  />
+                  <span className={`text-sm ${theme === 'light' ? 'text-gray-900 font-semibold' : 'text-gray-400'}`}>Light</span>
+                </div>
+              </div>
+            </div>
+
             {/* System Settings */}
             <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700 rounded-lg p-6">
               <h2 className="text-2xl font-semibold text-white mb-4">System Settings</h2>
@@ -250,18 +283,6 @@ const Settings = () => {
               <h2 className="text-2xl font-semibold text-white mb-4">Display Settings</h2>
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="theme" className="text-white">Theme</Label>
-                    <Select value={settings.theme} onValueChange={(value) => handleChange('theme', value)}>
-                      <SelectTrigger className="bg-gray-900 border-gray-700 text-white mt-2" data-testid="theme-select">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-gray-800 border-gray-700 text-white">
-                        <SelectItem value="dark">Dark</SelectItem>
-                        <SelectItem value="light">Light</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
                   <div>
                     <Label htmlFor="containers_per_page" className="text-white">Containers Per Page</Label>
                     <Input
@@ -400,7 +421,7 @@ const Settings = () => {
                 <h3 className="text-blue-400 font-semibold mb-1">Important Note</h3>
                 <p className="text-blue-300 text-sm">
                   Some settings like Docker socket path require a service restart to take effect. 
-                  Other changes are applied immediately upon saving.
+                  Theme changes are applied immediately. Other changes are saved and applied upon saving.
                 </p>
               </div>
             </div>
