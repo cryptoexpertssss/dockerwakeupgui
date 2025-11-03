@@ -587,6 +587,18 @@ async def create_container(request: CreateContainerRequest):
         if request.idle_timeout:
             labels['dockerwakeup.idle_timeout'] = str(request.idle_timeout)
         
+        # Add metadata to labels
+        if request.route:
+            labels['dockerwakeup.route'] = request.route
+        if request.docker_url:
+            labels['dockerwakeup.docker_url'] = request.docker_url
+        if request.docker_path:
+            labels['dockerwakeup.docker_path'] = request.docker_path
+        if request.deployment_type:
+            labels['dockerwakeup.deployment_type'] = request.deployment_type
+        if request.run_command:
+            labels['dockerwakeup.run_command'] = request.run_command
+        
         container = docker_client.containers.create(
             image=request.image,
             name=request.name,
