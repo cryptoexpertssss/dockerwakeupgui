@@ -152,18 +152,52 @@ def get_container_info(container):
         mem_usage = stats['memory_stats'].get('usage', 0) / (1024 * 1024)  # MB
         mem_limit = stats['memory_stats'].get('limit', 1) / (1024 * 1024)
         
-        # Network
-        networks = stats.get('networks', {})
+        # Network details
+        network_settings = container.attrs['NetworkSettings']
+        networks_detailed = {}
         
-        # Ports
-        ports = []
+        for network_name, network_info in network_settings['Networks'].items():
+            networks_detailed[network_name] = {
+                "ip_address": network_info.get('IPAddress', 'N/A'),
+                "gateway": network_info.get('Gateway', 'N/A'),
+                "mac_address": network_info.get('MacAddress', 'N/A'),
+                "network_id": network_info.get('NetworkID', 'N/A')[:12],
+                "ip_prefix_len": network_info.get('IPPrefixLen', 0),
+                "subnet": f"{network_info.get('IPAddress', '').rsplit('.', 1)[0]}.0/{network_info.get('IPPrefixLen', 0)}" if network_info.get('IPAddress') else 'N/A'
+            }
+        
+        # Ports with more details
+        ports_detailed = []
         if container.ports:
             for container_port, host_bindings in container.ports.items():
                 if host_bindings:
                     for binding in host_bindings:
-                        ports.append(f"{binding['HostPort']}->{container_port}")
+                        port_num, protocol = container_port.split('/')
+                        ports_detailed.append({
+                            "host_ip": binding.get('HostIp', '0.0.0.0'),
+                            "host_port": binding['HostPort'],
+                            "container_port": port_num,
+                            "protocol": protocol.upper(),
+                            "mapping": f"{binding.get('HostIp', '0.0.0.0')}:{binding['HostPort']}->{port_num}/{protocol}"
+                        })
                 else:
-                    ports.append(container_port)
+                    port_num, protocol = container_port.split('/')
+                    ports_detailed.append({
+                        "host_ip": None,
+                        "host_port": None,
+                        "container_port": port_num,
+                        "protocol": protocol.upper(),
+                        "mapping": f"{port_num}/{protocol} (exposed)"
+                    })
+        
+        # Check if likely NPM container
+        is_npm = 'nginx-proxy-manager' in container.name.lower() or 'npm' in container.name.lower()
+        
+        # Get hostname
+        hostname = container.attrs['Config'].get('Hostname', 'N/A')
+        
+        # Get domain name
+        domainname = container.attrs['Config'].get('Domainname', '')
         
         return {
             "id": container.short_id,
@@ -174,8 +208,17 @@ def get_container_info(container):
             "created": container.attrs['Created'],
             "type": "compose" if container.labels.get('com.docker.compose.project') else "docker_run",
             "compose_project": container.labels.get('com.docker.compose.project', ''),
-            "ports": ports,
+            "hostname": hostname,
+            "domainname": domainname,
+            "is_npm": is_npm,
+            "ports": [p["mapping"] for p in ports_detailed],  # Keep simple format for backward compatibility
+            "ports_detailed": ports_detailed,
             "networks": list(container.attrs['NetworkSettings']['Networks'].keys()),
+            "networks_detailed": networks_detailed,
+            "ip_address": network_settings.get('IPAddress', 'N/A'),  # Primary IP
+            "gateway": network_settings.get('Gateway', 'N/A'),
+            "mac_address": network_settings.get('MacAddress', 'N/A'),
+            "network_mode": container.attrs['HostConfig'].get('NetworkMode', 'default'),
             "stats": {
                 "cpu_percent": round(cpu_percent, 2),
                 "memory_mb": round(mem_usage, 2),
@@ -194,8 +237,17 @@ def get_container_info(container):
             "created": "",
             "type": "unknown",
             "compose_project": "",
+            "hostname": "N/A",
+            "domainname": "",
+            "is_npm": False,
             "ports": [],
+            "ports_detailed": [],
             "networks": [],
+            "networks_detailed": {},
+            "ip_address": "N/A",
+            "gateway": "N/A",
+            "mac_address": "N/A",
+            "network_mode": "unknown",
             "stats": {"cpu_percent": 0, "memory_mb": 0, "memory_limit_mb": 0, "memory_percent": 0}
         }
 
