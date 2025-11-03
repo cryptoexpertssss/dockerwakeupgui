@@ -55,7 +55,13 @@ const Settings = () => {
     docker_socket_path: '/var/run/docker.sock',
     log_retention_days: 30,
     enable_auto_prune: false,
-    auto_prune_schedule: 'weekly'
+    auto_prune_schedule: 'weekly',
+    
+    // Alerts
+    enable_alerts: true,
+    cpu_alert_threshold: 80,
+    memory_alert_threshold: 80,
+    disk_alert_threshold: 85
   });
 
   const fetchSettings = async () => {
