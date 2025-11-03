@@ -1,0 +1,12 @@
+{
+  "idleThreshold": 3600,
+  "pollInterval": 30,
+  "proxyPort": 8080,
+  "composeDirs": ["/opt", "/home", "/var/lib/docker"],
+  "autoDetect": true,
+  "wakeOnRequest": true,
+  "logLevel": "info",
+  "mongoEnabled": true,
+  "mongoUrl": "mongodb://mongodb:27017",
+  "database": "dockerwakeup"
+}

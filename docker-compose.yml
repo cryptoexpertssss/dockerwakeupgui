@@ -1,7 +1,7 @@
 version: "3.8"
 
 services:
-  # MongoDB Database
+  # MongoDB Database - Shared by both WebUI and DockerWakeUp
   mongodb:
     image: mongo:7
     container_name: dockerwakeup-mongodb
@@ -18,7 +18,31 @@ services:
       timeout: 5s
       retries: 5
 
-  # Backend API
+  # Original DockerWakeUp Monitor Service
+  dockerwakeup-monitor:
+    build:
+      context: ./dockerwakeup-original
+      dockerfile: Dockerfile
+    container_name: dockerwakeup-monitor
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./dockerwakeup-original/config.json:/app/config.json
+    environment:
+      - MONGO_URL=mongodb://mongodb:27017
+      - DB_NAME=dockerwakeup
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - dockerwakeup
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "python"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # WebUI Backend API
   backend:
     build:
       context: ./backend
@@ -45,7 +69,7 @@ services:
       retries: 3
       start_period: 10s
 
-  # Frontend Web Server
+  # WebUI Frontend Web Server
   frontend:
     build:
       context: ./frontend
@@ -58,6 +82,7 @@ services:
       - "9999:80"
     depends_on:
       - backend
+      - dockerwakeup-monitor
     networks:
       - dockerwakeup
     healthcheck:
@@ -69,6 +94,7 @@ services:
 volumes:
   mongodb_data:
     driver: local
+    name: dockerwakeup_mongodb_data
 
 networks:
   dockerwakeup:
