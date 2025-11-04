@@ -428,6 +428,132 @@ async def root():
     return {"message": "DockerWakeUp WebUI API", "version": "3.0.0", "docker_available": DOCKER_AVAILABLE}
 
 
+@api_router.get("/containers/detect")
+async def auto_detect_containers():
+    """Auto-detect containers and docker-compose projects"""
+    if not DOCKER_AVAILABLE:
+        return JSONResponse({"error": "Docker not available"}, status_code=503)
+    
+    try:
+        detected = {
+            "running_containers": [],
+            "compose_projects": []
+        }
+        
+        # Get all containers
+        containers = docker_client.containers.list(all=True)
+        
+        for container in containers:
+            # Check if already has DockerWakeUp metadata
+            has_metadata = any(label.startswith('dockerwakeup.') for label in container.labels.keys())
+            
+            container_info = {
+                "name": container.name,
+                "id": container.short_id,
+                "image": container.image.tags[0] if container.image.tags else container.image.short_id,
+                "status": container.status,
+                "has_metadata": has_metadata,
+                "type": "compose" if container.labels.get('com.docker.compose.project') else "docker_run",
+                "compose_project": container.labels.get('com.docker.compose.project', ''),
+                "ports": [],
+                "volumes": [],
+                "environment": container.attrs['Config'].get('Env', []),
+                "network_mode": container.attrs['HostConfig'].get('NetworkMode', 'bridge'),
+                "restart_policy": container.attrs['HostConfig']['RestartPolicy']['Name'] or 'no'
+            }
+            
+            # Extract ports
+            if container.ports:
+                for container_port, host_bindings in container.ports.items():
+                    if host_bindings:
+                        for binding in host_bindings:
+                            port_num, protocol = container_port.split('/')
+                            container_info["ports"].append({
+                                "host_port": binding['HostPort'],
+                                "container_port": port_num,
+                                "protocol": protocol
+                            })
+            
+            # Extract volumes
+            if container.attrs['HostConfig'].get('Binds'):
+                for bind in container.attrs['HostConfig']['Binds']:
+                    parts = bind.split(':')
+                    if len(parts) >= 2:
+                        container_info["volumes"].append({
+                            "host_path": parts[0],
+                            "container_path": parts[1],
+                            "mode": parts[2] if len(parts) > 2 else "rw"
+                        })
+            
+            detected["running_containers"].append(container_info)
+        
+        # Scan for docker-compose projects in common directories
+        compose_dirs = ['/opt', '/home', '/root', '/var/lib/docker']
+        for base_dir in compose_dirs:
+            try:
+                for root, dirs, files in os.walk(base_dir):
+                    if 'docker-compose.yml' in files or 'docker-compose.yaml' in files:
+                        compose_file = os.path.join(root, 'docker-compose.yml' if 'docker-compose.yml' in files else 'docker-compose.yaml')
+                        
+                        # Check if not too deep (max 3 levels)
+                        depth = root[len(base_dir):].count(os.sep)
+                        if depth <= 3:
+                            detected["compose_projects"].append({
+                                "path": compose_file,
+                                "directory": root,
+                                "project_name": os.path.basename(root)
+                            })
+            except (PermissionError, OSError):
+                pass
+        
+        return detected
+    except Exception as e:
+        logging.error(f"Error auto-detecting containers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/containers/import")
+async def import_container(container_data: dict):
+    """Import a detected container with its configuration"""
+    try:
+        # Store metadata in labels
+        labels = {
+            "dockerwakeup.imported": "true",
+            "dockerwakeup.import_date": datetime.now(timezone.utc).isoformat()
+        }
+        
+        if container_data.get('type') == 'compose':
+            labels["dockerwakeup.deployment_type"] = "compose"
+            if container_data.get('compose_project'):
+                labels["dockerwakeup.compose_project"] = container_data['compose_project']
+        else:
+            labels["dockerwakeup.deployment_type"] = "docker_run"
+        
+        # Update container with metadata
+        if DOCKER_AVAILABLE:
+            try:
+                container = docker_client.containers.get(container_data['name'])
+                # Note: Docker API doesn't allow updating labels on running containers
+                # Labels can only be set during creation
+                # So we'll log the import in MongoDB instead
+                
+                await log_activity(
+                    "import_container", 
+                    container_data['name'], 
+                    "success", 
+                    f"Container {container_data['name']} imported to DockerWakeUp"
+                )
+                
+                return {"success": True, "message": f"Container {container_data['name']} imported"}
+            except docker.errors.NotFound:
+                raise HTTPException(status_code=404, detail="Container not found")
+        
+    except Exception as e:
+        error_msg = f"Error importing container: {str(e)}"
+        logging.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+
 @api_router.get("/containers")
 async def list_containers(all: bool = True):
     if not DOCKER_AVAILABLE:
