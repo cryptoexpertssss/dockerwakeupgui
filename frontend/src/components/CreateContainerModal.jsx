@@ -243,15 +243,56 @@ const CreateContainerModal = ({ containers, onClose, onSuccess }) => {
 
                 <div>
                   <Label htmlFor="docker_url" className="text-white">Docker URL & Port (Optional)</Label>
-                  <Input
-                    id="docker_url"
-                    data-testid="docker-url-input"
-                    value={formData.docker_url}
-                    onChange={(e) => handleInputChange('docker_url', e.target.value)}
-                    placeholder="http://localhost:8080 or container-name:3000"
-                    className="bg-gray-800 border-gray-700 text-white mt-2"
-                  />
-                  <p className="text-xs text-gray-400 mt-1">Internal Docker URL where the container is running</p>
+                  <div className="space-y-2">
+                    <Select 
+                      value={formData.docker_url || 'custom'} 
+                      onValueChange={(value) => {
+                        if (value !== 'custom') {
+                          handleInputChange('docker_url', value);
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="bg-gray-800 border-gray-700 text-white mt-2" data-testid="docker-url-select">
+                        <SelectValue placeholder="Select from running containers or enter custom..." />
+                      </SelectTrigger>
+                      <SelectContent className="bg-gray-800 border-gray-700 text-white max-h-64">
+                        <SelectItem value="custom">🖊️ Custom URL...</SelectItem>
+                        {containers.filter(c => c.status === 'running').map((container) => {
+                          // Generate Docker URL from container
+                          const primaryPort = container.ports_detailed?.[0]?.container_port || '80';
+                          const dockerUrl = `http://${container.name}:${primaryPort}`;
+                          const displayUrl = container.docker_url || dockerUrl;
+                          
+                          return (
+                            <SelectItem key={container.name} value={displayUrl}>
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold">{container.name}</span>
+                                <span className="text-xs text-gray-400">→</span>
+                                <span className="text-xs font-mono text-blue-300">{displayUrl}</span>
+                              </div>
+                            </SelectItem>
+                          );
+                        })}
+                        {containers.filter(c => c.status === 'running').length === 0 && (
+                          <SelectItem value="none" disabled>No running containers</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                    
+                    {(!formData.docker_url || formData.docker_url === 'custom' || !containers.some(c => c.docker_url === formData.docker_url || `http://${c.name}:${c.ports_detailed?.[0]?.container_port || '80'}` === formData.docker_url)) && (
+                      <Input
+                        id="docker_url"
+                        data-testid="docker-url-input"
+                        value={formData.docker_url === 'custom' ? '' : formData.docker_url}
+                        onChange={(e) => handleInputChange('docker_url', e.target.value)}
+                        placeholder="http://localhost:8080 or http://container-name:3000"
+                        className="bg-gray-800 border-gray-700 text-white"
+                      />
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Select from running containers or enter custom internal Docker URL
+                  </p>
                 </div>
 
                 <div>
