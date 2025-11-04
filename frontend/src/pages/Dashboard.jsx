@@ -315,6 +315,17 @@ const Dashboard = () => {
           }}
         />
       )}
+
+      {showAutoDetect && (
+        <AutoDetectModal
+          onClose={() => setShowAutoDetect(false)}
+          onSuccess={() => {
+            setShowAutoDetect(false);
+            fetchContainers();
+            toast.success('Containers imported successfully!');
+          }}
+        />
+      )}
     </div>
   );
 };
