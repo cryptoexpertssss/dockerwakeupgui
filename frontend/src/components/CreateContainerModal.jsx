@@ -230,14 +230,41 @@ const CreateContainerModal = ({ containers, onClose, onSuccess }) => {
 
                 <div>
                   <Label htmlFor="route" className="text-white">Route / URL (Optional)</Label>
-                  <Input
-                    id="route"
-                    data-testid="route-input"
-                    value={formData.route}
-                    onChange={(e) => handleInputChange('route', e.target.value)}
-                    placeholder="/api or https://example.com"
-                    className="bg-gray-800 border-gray-700 text-white mt-2"
-                  />
+                  <div className="space-y-2">
+                    <Select 
+                      value={formData.route || 'custom'} 
+                      onValueChange={(value) => {
+                        if (value !== 'custom') {
+                          handleInputChange('route', value);
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="bg-gray-800 border-gray-700 text-white mt-2" data-testid="route-select">
+                        <SelectValue placeholder="Select common route or enter custom..." />
+                      </SelectTrigger>
+                      <SelectContent className="bg-gray-800 border-gray-700 text-white">
+                        <SelectItem value="custom">🖊️ Custom Route...</SelectItem>
+                        <SelectItem value="/">/ (Root)</SelectItem>
+                        <SelectItem value="/api">/api (API Endpoint)</SelectItem>
+                        <SelectItem value="/admin">/admin (Admin Panel)</SelectItem>
+                        <SelectItem value="/app">/app (Application)</SelectItem>
+                        <SelectItem value="/dashboard">/dashboard (Dashboard)</SelectItem>
+                        <SelectItem value="/auth">/auth (Authentication)</SelectItem>
+                        <SelectItem value="/docs">/docs (Documentation)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    
+                    {(!formData.route || formData.route === 'custom') && (
+                      <Input
+                        id="route"
+                        data-testid="route-input"
+                        value={formData.route === 'custom' ? '' : formData.route}
+                        onChange={(e) => handleInputChange('route', e.target.value)}
+                        placeholder="/api or https://example.com/path"
+                        className="bg-gray-800 border-gray-700 text-white"
+                      />
+                    )}
+                  </div>
                   <p className="text-xs text-gray-400 mt-1">URL route or domain where this container is accessible</p>
                 </div>
 
