@@ -1,59 +1,39 @@
-FROM python:3.11-slim
+FROM node:20-alpine
 
 WORKDIR /app
 
-# Install git and other dependencies
-RUN apt-get update && apt-get install -y \
+# Install system dependencies
+RUN apk add --no-cache \
     git \
     curl \
-    procps \
-    && rm -rf /var/lib/apt/lists/*
+    bash \
+    docker-cli
 
-# Clone the original DockerWakeUp repository directly to /app
-RUN git clone https://github.com/jelliott2021/DockerWakeUp.git /tmp/dockerwakeup && \
-    cp -r /tmp/dockerwakeup/* /app/ || cp -r /tmp/dockerwakeup/.* /app/ 2>/dev/null || true && \
-    rm -rf /tmp/dockerwakeup && \
-    ls -la /app/
+# Copy the entire DockerWakeUp application (now embedded in repo)
+COPY . /app/
 
-# Install Python dependencies
-RUN pip install --no-cache-dir \
-    docker \
-    pyyaml \
-    requests \
-    pymongo \
-    python-dotenv
+# Install wake-proxy dependencies
+WORKDIR /app/wake-proxy
+RUN npm install
 
-# Copy config
-COPY config.json /app/config.json
+# Install nginx-generator dependencies  
+WORKDIR /app/nginx-generator
+RUN npm install
 
-# Create a wrapper script to run whatever Python file exists
-RUN echo '#!/bin/bash\n\
-echo "DockerWakeUp Monitor Starting..."\n\
-echo "Files in /app:"\n\
-ls -la /app/\n\
-\n\
-# Find and run the first Python script\n\
-if [ -f /app/dockerwakeup.py ]; then\n\
-    echo "Running dockerwakeup.py"\n\
-    python /app/dockerwakeup.py\n\
-elif [ -f /app/main.py ]; then\n\
-    echo "Running main.py"\n\
-    python /app/main.py\n\
-else\n\
-    PYTHON_FILE=$(find /app -maxdepth 1 -name "*.py" -type f | head -1)\n\
-    if [ -n "$PYTHON_FILE" ]; then\n\
-        echo "Running $PYTHON_FILE"\n\
-        python "$PYTHON_FILE"\n\
-    else\n\
-        echo "No Python files found. Original DockerWakeUp may not have been cloned."\n\
-        echo "Running in monitor mode - keeping container alive"\n\
-        tail -f /dev/null\n\
-    fi\n\
-fi' > /app/start.sh && chmod +x /app/start.sh
+# Back to root
+WORKDIR /app
+
+# Make scripts executable
+RUN chmod +x /app/*.sh 2>/dev/null || true
+RUN chmod +x /app/wake-proxy/src/*.js 2>/dev/null || true
+RUN chmod +x /app/nginx-generator/*.js 2>/dev/null || true
+
+# Copy config if not exists
+RUN if [ ! -f /app/config.json ]; then cp /app/config.json.example /app/config.json; fi
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD pgrep -f python || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD pgrep -f node || exit 1
 
-# Run the start script
-CMD ["/app/start.sh"]
+# Start the wake-proxy service
+CMD ["node", "/app/wake-proxy/src/index.js"]
