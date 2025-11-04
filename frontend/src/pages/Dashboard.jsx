@@ -129,6 +129,14 @@ const Dashboard = () => {
               </div>
               <div className="flex gap-3">
                 <button
+                  onClick={() => setShowAutoDetect(true)}
+                  data-testid="auto-detect-button"
+                  className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors"
+                >
+                  <Scan size={18} />
+                  Auto-Detect
+                </button>
+                <button
                   onClick={() => setShowPullModal(true)}
                   data-testid="pull-image-button"
                   className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
