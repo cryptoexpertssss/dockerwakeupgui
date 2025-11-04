@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Activity, Box, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, AlertCircle, Plus, Search, Grid, List, Filter } from 'lucide-react';
+import { Activity, Box, Image as ImageIcon, Settings as SettingsIcon, RefreshCw, AlertCircle, Plus, Search, Grid, List, Filter, Scan } from 'lucide-react';
 import { toast } from 'sonner';
 import Sidebar from '../components/Sidebar';
 import ContainerCard from '../components/ContainerCard';
@@ -9,6 +9,7 @@ import SystemMetrics from '../components/SystemMetrics';
 import BulkActionBar from '../components/BulkActionBar';
 import CreateContainerModal from '../components/CreateContainerModal';
 import PullImageModal from '../components/PullImageModal';
+import AutoDetectModal from '../components/AutoDetectModal';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -25,6 +26,7 @@ const Dashboard = () => {
   const [dockerAvailable, setDockerAvailable] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showPullModal, setShowPullModal] = useState(false);
+  const [showAutoDetect, setShowAutoDetect] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
